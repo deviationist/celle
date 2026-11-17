@@ -1,0 +1,5 @@
+/celle
+/bin/
+.env
+.env.*
+!.env.example

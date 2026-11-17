@@ -1,0 +1,31 @@
+# Production: docker compose -p celle-prod --env-file .env.prod up -d --build --wait
+# The host, bind address and port are set in .env.prod (see .env.example).
+services:
+  celle:
+    build:
+      context: .
+      args:
+        VERSION: ${CELLE_VERSION:-dev}
+    image: celle:${CELLE_VERSION:-dev}
+    restart: unless-stopped
+    environment:
+      CELLE_ADDR: ":8080"
+      CELLE_DEFAULT_TZ: ${CELLE_DEFAULT_TZ:-Europe/Oslo}
+      CELLE_TOKENS: ${CELLE_TOKENS:?set CELLE_TOKENS in the env file}
+    ports:
+      - "${CELLE_BIND:-127.0.0.1}:${CELLE_PORT:-8095}:8080"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      # The image has no shell or curl; the binary probes its own /healthz.
+      test: ["CMD", "/celle", "-health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
