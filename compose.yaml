@@ -11,6 +11,8 @@ services:
     environment:
       CELLE_ADDR: ":8080"
       CELLE_DEFAULT_TZ: ${CELLE_DEFAULT_TZ:-Europe/Oslo}
+      CELLE_DEFAULT_PAYDAY: ${CELLE_DEFAULT_PAYDAY:-}
+      CELLE_DEFAULT_COUNTRY: ${CELLE_DEFAULT_COUNTRY:-}
       CELLE_TOKENS: ${CELLE_TOKENS:?set CELLE_TOKENS in the env file}
     ports:
       - "${CELLE_BIND:-127.0.0.1}:${CELLE_PORT:-8095}:8080"

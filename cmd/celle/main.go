@@ -14,6 +14,8 @@ import (
 	_ "time/tzdata" // the container has no zoneinfo
 
 	"github.com/deviationist/celle/internal/api"
+	"github.com/deviationist/celle/internal/calendar"
+	"github.com/deviationist/celle/internal/dates"
 )
 
 var version = "dev"
@@ -42,9 +44,27 @@ func main() {
 		}
 	}
 
+	payday := os.Getenv("CELLE_DEFAULT_PAYDAY")
+	if payday != "" {
+		if _, err := dates.ParsePayday(payday); err != nil {
+			slog.Error("bad CELLE_DEFAULT_PAYDAY", "err", err)
+			os.Exit(1)
+		}
+	}
+	country := os.Getenv("CELLE_DEFAULT_COUNTRY")
+	if country != "" {
+		if _, err := calendar.Get(country); err != nil {
+			slog.Error("bad CELLE_DEFAULT_COUNTRY", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           api.New(api.Config{Version: version, DefaultTZ: loc, Tokens: tokens}),
+		Addr: addr,
+		Handler: api.New(api.Config{
+			Version: version, DefaultTZ: loc, Tokens: tokens,
+			DefaultPayday: payday, DefaultCountry: country,
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -53,7 +73,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
-		slog.Info("listening", "addr", addr, "version", version, "default_tz", tzName, "tokens", len(tokens))
+		slog.Info("listening", "addr", addr, "version", version, "default_tz", tzName, "tokens", len(tokens), "default_payday", payday, "default_country", country)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server", "err", err)
 			os.Exit(1)

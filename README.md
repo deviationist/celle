@@ -41,6 +41,9 @@ Common parameters:
 - `date_format`: output pattern with `YYYY`, `YY`, `MM`, `M`, `DD`, `D`.
 - `tz`: IANA zone that decides "today" (default `CELLE_DEFAULT_TZ`, `Europe/Oslo`).
 - `country`: ISO code (`NO`); `norway`/`norge` are accepted for Banko URLs.
+  Optional when the server sets `CELLE_DEFAULT_COUNTRY`. On the payday
+  endpoints, `country=none` turns off moving to a banking day.
+- `day` (payday endpoints): optional when the server sets `CELLE_DEFAULT_PAYDAY`.
 
 Supported countries: Norway. Adding one is an entry in
 `internal/calendar/calendar.go` plus its bank-only closing days.
@@ -63,5 +66,6 @@ only auth. Make sure the proxy doesn't log query strings, since the token is
 in them.
 
 Configuration is environment only: `CELLE_TOKENS` (required, comma-separated,
-16+ characters each, no expiry), `CELLE_DEFAULT_TZ`, `CELLE_ADDR`, and for
+16+ characters each, no expiry), `CELLE_DEFAULT_TZ`, `CELLE_DEFAULT_PAYDAY`,
+`CELLE_DEFAULT_COUNTRY`, `CELLE_ADDR`, and for
 compose `CELLE_BIND`/`CELLE_PORT`.

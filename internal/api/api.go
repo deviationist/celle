@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -22,6 +23,12 @@ import (
 type Config struct {
 	Version   string
 	DefaultTZ *time.Location
+	// DefaultPayday ("1"–"31" or "last") is used when a payday request has
+	// no day. Empty means day is required.
+	DefaultPayday string
+	// DefaultCountry is used when a request has no country. Empty means
+	// country is required where a calendar is needed.
+	DefaultCountry string
 	// Tokens are the accepted API tokens. Empty means every operation except
 	// the public ones answers 401.
 	Tokens []string
@@ -139,7 +146,13 @@ func (s *server) today(tz string) (time.Time, error) {
 	return dates.Today(s.cfg.Now(), loc), nil
 }
 
-func getCalendar(country string) (*calendar.Calendar, error) {
+func (s *server) getCalendar(country string) (*calendar.Calendar, error) {
+	if country == "" {
+		country = s.cfg.DefaultCountry
+	}
+	if country == "" {
+		return nil, huma.Error400BadRequest("country is required (no default configured)")
+	}
 	c, err := calendar.Get(country)
 	if err != nil {
 		return nil, huma.Error400BadRequest(err.Error())
@@ -189,7 +202,7 @@ func (s *server) countries(ctx context.Context, _ *struct{}) (*CountriesOutput, 
 // --- holidays ---
 
 type HolidaysInput struct {
-	Country    string `query:"country" required:"true" doc:"ISO 3166 country code" example:"NO"`
+	Country    string `query:"country" doc:"ISO 3166 country code. Defaults to the server's CELLE_DEFAULT_COUNTRY" example:"NO"`
 	Year       int    `query:"year" doc:"Defaults to the current year"`
 	DateFormat string `query:"date_format" doc:"Output pattern for the dates"`
 	TZParam
@@ -218,7 +231,7 @@ func (b HolidaysBody) PlainText() string {
 type HolidaysOutput struct{ Body HolidaysBody }
 
 func (s *server) holidays(ctx context.Context, in *HolidaysInput) (*HolidaysOutput, error) {
-	c, err := getCalendar(in.Country)
+	c, err := s.getCalendar(in.Country)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +284,7 @@ func (s *server) daysUntil(ctx context.Context, in *DaysUntilInput) (*DaysOutput
 
 type BankingDaysUntilInput struct {
 	Date    string `query:"date" required:"true" doc:"YYYY-MM-DD, DD.MM.YYYY or a spreadsheet serial number" example:"2026-12-24"`
-	Country string `query:"country" required:"true" doc:"ISO 3166 country code" example:"NO"`
+	Country string `query:"country" doc:"ISO 3166 country code. Defaults to the server's CELLE_DEFAULT_COUNTRY" example:"NO"`
 	TZParam
 }
 
@@ -280,7 +293,7 @@ func (s *server) bankingDaysUntil(ctx context.Context, in *BankingDaysUntilInput
 	if err != nil {
 		return nil, err
 	}
-	c, err := getCalendar(in.Country)
+	c, err := s.getCalendar(in.Country)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +308,7 @@ func (s *server) bankingDaysUntil(ctx context.Context, in *BankingDaysUntilInput
 
 type BankingDayInput struct {
 	Date       string `query:"date" required:"true" doc:"YYYY-MM-DD, DD.MM.YYYY or a spreadsheet serial number" example:"2026-12-25"`
-	Country    string `query:"country" required:"true" doc:"ISO 3166 country code" example:"NO"`
+	Country    string `query:"country" doc:"ISO 3166 country code. Defaults to the server's CELLE_DEFAULT_COUNTRY" example:"NO"`
 	Roll       string `query:"roll" enum:"previous,next" default:"previous" doc:"Direction to move a non-banking day"`
 	DateFormat string `query:"date_format" doc:"Output pattern for the date: YYYY, YY, MM, M, DD and D are replaced. Default YYYY-MM-DD"`
 }
@@ -316,7 +329,7 @@ func (s *server) bankingDay(ctx context.Context, in *BankingDayInput) (*DateOutp
 	if err != nil {
 		return nil, err
 	}
-	c, err := getCalendar(in.Country)
+	c, err := s.getCalendar(in.Country)
 	if err != nil {
 		return nil, err
 	}
@@ -330,23 +343,34 @@ func (s *server) bankingDay(ctx context.Context, in *BankingDayInput) (*DateOutp
 // --- payday ---
 
 type PaydayInput struct {
-	Day        string `query:"day" required:"true" doc:"Day of the month (1–31) or \"last\". A day past the month's end means its last day" example:"25"`
+	Day        string `query:"day" doc:"Day of the month (1–31) or \"last\". A day past the month's end means its last day. Defaults to the server's CELLE_DEFAULT_PAYDAY" example:"25"`
 	Year       int    `query:"year" doc:"With month: that month's payday. Without both: the next payday"`
 	Month      int    `query:"month" minimum:"0" maximum:"12" doc:"1–12, used together with year"`
-	Country    string `query:"country" doc:"ISO 3166 country code. When set, a payday that is not a banking day is moved to one" example:"NO"`
+	Country    string `query:"country" doc:"ISO 3166 country code; a payday that is not a banking day is moved to one. Defaults to the server's CELLE_DEFAULT_COUNTRY; \"none\" turns moving off" example:"NO"`
 	Roll       string `query:"roll" enum:"previous,next" default:"previous" doc:"Direction to move a payday that is not a banking day"`
 	DateFormat string `query:"date_format" doc:"Output pattern for the date: YYYY, YY, MM, M, DD and D are replaced. Default YYYY-MM-DD"`
 	TZParam
 }
 
 func (s *server) resolvePayday(in *PaydayInput) (payday, today time.Time, err error) {
-	day, err := dates.ParsePayday(in.Day)
+	dayStr := in.Day
+	if dayStr == "" {
+		dayStr = s.cfg.DefaultPayday
+	}
+	if dayStr == "" {
+		return payday, today, huma.Error400BadRequest("day is required (no default configured)")
+	}
+	day, err := dates.ParsePayday(dayStr)
 	if err != nil {
 		return payday, today, huma.Error400BadRequest(err.Error())
 	}
 	var c *calendar.Calendar
-	if in.Country != "" {
-		if c, err = getCalendar(in.Country); err != nil {
+	country := in.Country
+	if country == "" {
+		country = s.cfg.DefaultCountry
+	}
+	if country != "" && !strings.EqualFold(country, "none") {
+		if c, err = s.getCalendar(country); err != nil {
 			return payday, today, err
 		}
 	}

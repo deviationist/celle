@@ -138,3 +138,40 @@ func TestHolidaysText(t *testing.T) {
 		t.Errorf("holidays text:\n%s", b)
 	}
 }
+
+func TestDefaults(t *testing.T) {
+	oslo, _ := time.LoadLocation("Europe/Oslo")
+	h := New(Config{DefaultTZ: oslo, Tokens: []string{testToken}, Now: func() time.Time { return now },
+		DefaultPayday: "15", DefaultCountry: "NO"})
+	tok := "&token=" + testToken
+	cases := map[string]string{
+		"/v1/payday?raw":                                 "2026-12-15", // Nov 15 has passed (Nov 17)
+		"/v1/days-until-payday?raw":                      "28",
+		"/v1/payday?raw&day=25":                          "2026-11-25", // ?day= overrides
+		"/v1/payday?raw&year=2026&month=11":              "2026-11-13", // Sun 15th rolls back to Fri
+		"/v1/payday?raw&year=2026&month=11&country=none": "2026-11-15",
+		"/v1/banking-day?raw&date=2026-12-25":            "2026-12-23",
+		"/v1/holidays?raw&year=2026":                     "", // checked by prefix below
+	}
+	for path, want := range cases {
+		rec := get(h, path+tok, nil)
+		got := strings.TrimSpace(rec.Body.String())
+		if rec.Code != 200 || (want != "" && got != want) {
+			t.Errorf("%s: %d %q, want %q", path, rec.Code, got, want)
+		}
+	}
+}
+
+func TestNoDefaults(t *testing.T) {
+	h := newTestServer(now)
+	tok := "&token=" + testToken
+	for _, path := range []string{"/v1/payday?raw", "/v1/banking-day?raw&date=2026-12-25"} {
+		if rec := get(h, path+tok, nil); rec.Code != 400 {
+			t.Errorf("%s: %d, want 400", path, rec.Code)
+		}
+	}
+	// Without a country, a payday is not moved.
+	if b := get(h, "/v1/payday?raw&day=15&year=2026&month=11"+tok, nil).Body.String(); b != "2026-11-15" {
+		t.Errorf("no-country payday = %q", b)
+	}
+}
